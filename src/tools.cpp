@@ -4,21 +4,124 @@
 using Eigen::VectorXd;
 using Eigen::MatrixXd;
 using std::vector;
+using std::cout;
+using std::endl;
 
-Tools::Tools() {}
+namespace tools {
+  
+    void NormalizeAngle(VectorXd &y) {
+      y(1) = fmod(y(1) + M_PI, 2 * M_PI);
+      if (y(1) < 0)
+        y(1) += 2 * M_PI;
+      y(1) -= M_PI;
+    }
+  
+    VectorXd NonLinearH(const VectorXd &x_state) {
+      
+      VectorXd hx(3);
+      hx(0) = sqrt( pow(x_state(0), 2.0) + pow(x_state(1), 2.0));
+      hx(1) = atan2(x_state(1), x_state(0));
+      hx(2) = (x_state(0)*x_state(2) + x_state(1)*x_state(3)) / hx(0);
 
-Tools::~Tools() {}
+      return hx;
+    }
+  
+    VectorXd Polar2Cartesian(const VectorXd &raw_measurements) {
+      
+      VectorXd x = VectorXd(4);
+      
+      x << raw_measurements[0] * cos(raw_measurements[1]),
+           raw_measurements[0] * sin(raw_measurements[1]),
+           raw_measurements[2] * cos(raw_measurements[1]),
+           raw_measurements[2] * sin(raw_measurements[1]);
 
-VectorXd Tools::CalculateRMSE(const vector<VectorXd> &estimations,
-                              const vector<VectorXd> &ground_truth) {
-  /**
-   * TODO: Calculate the RMSE here.
-   */
-}
+      return x;
+    }
 
-MatrixXd Tools::CalculateJacobian(const VectorXd& x_state) {
-  /**
-   * TODO:
-   * Calculate a Jacobian here.
-   */
+	VectorXd CalculateRMSE(const vector<VectorXd> &estimations,
+	                              const vector<VectorXd> &ground_truth) {
+      
+	  VectorXd rmse(4);
+	  rmse << 0, 0, 0, 0;
+	
+	  // check the validity of the following inputs:
+	  //  * the estimation vector size should not be zero
+	  //  * the estimation vector size should equal ground truth vector size
+	  if (estimations.size() != ground_truth.size()
+	      || 0u == estimations.size()) {
+	    cout << "Invalid estimation or ground_truth data" << endl;
+	  }
+	  else {
+	  // accumulate squared residuals
+	  	for (unsigned int i = 0u; i < estimations.size(); ++i) {
+	
+	    	VectorXd residual = estimations[i] - ground_truth[i];
+	
+	    	// coefficient-wise multiplication
+	    	residual = residual.array() * residual.array();
+	    	rmse += residual;
+	  	}
+	
+	  	// calculate the mean
+	  	rmse = rmse / estimations.size();
+	
+	  	// calculate the squared root
+	  	rmse = rmse.array().sqrt();
+	  }
+	
+	  // return the result
+	  return rmse;
+	}
+  
+  	MatrixXd CalculateProcessNoiseCovarianceMatrix(double elapsed_time, double noise_ax, double noise_ay) {
+      MatrixXd Q;
+      Q = MatrixXd::Zero(4, 4);
+
+      // dt and sigma terms
+      double elapsed_time2 = pow(elapsed_time, 2.0);
+      double elapsed_time3 = pow(elapsed_time, 3.0);
+      double elapsed_time4 = pow(elapsed_time, 4.0);
+
+      // elements on the diagonal
+      Q(0,0) = elapsed_time4 / 4 * noise_ax;
+      Q(0,2) = elapsed_time3 / 2 * noise_ax;
+      Q(1,1) = elapsed_time4 / 4 * noise_ay;
+      Q(1,3) = elapsed_time3 / 2 * noise_ay;
+      Q(2,0) = Q(0,2);
+      Q(2,2) = elapsed_time2 * noise_ax;
+      Q(3,1) = Q(1,3);
+      Q(3,3) = elapsed_time2 * noise_ay;
+
+      return Q;
+    }
+
+   MatrixXd CalculateJacobian(const VectorXd &x_state) {
+  
+     MatrixXd Hj(3,4);
+  
+     // recover state parameters
+     float px = x_state(0);
+     float py = x_state(1);
+     float vx = x_state(2);
+     float vy = x_state(3);
+   
+     // pre-compute a set of terms to avoid repeated calculation
+     float c1 = px * px + py * py;
+     float c2 = sqrt(c1);
+     float c3 = c1 * c2;
+   
+     // check division by zero
+     if (fabs(c1) < 0.0001) {
+       cout << "CalculateJacobian () - Error - Division by Zero" << endl;
+       return Hj;
+     }
+   
+     // compute the Jacobian matrix
+     Hj << (px/c2), (py/c2), 0, 0,
+         -(py/c1), (px/c1), 0, 0,
+         py*(vx*py - vy*px)/c3, px*(px*vy - py*vx)/c3, px/c2, py/c2;
+   
+     return Hj;
+   }
+  
 }
